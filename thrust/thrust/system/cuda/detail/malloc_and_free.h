@@ -57,6 +57,15 @@ inline cub::CachingDeviceAllocator& get_allocator()
 #  endif
 #endif
 
+class LobsterAllocator {
+public:
+  LobsterAllocator(void *alloc);
+  void *allocate(size_t size);
+  void deallocate(void *ptr);
+};
+
+LobsterAllocator *lobster_global_alloc();
+
 // note that malloc returns a raw pointer to avoid
 // depending on the heavyweight thrust/system/cuda/memory.h header
 template <typename DerivedPolicy>
@@ -81,7 +90,12 @@ _CCCL_HOST_DEVICE void* malloc(execution_policy<DerivedPolicy>&, std::size_t n)
 #else // not __CUB_CACHING_MALLOC
   NV_IF_TARGET(
     NV_IS_HOST,
-    (cudaError_t status = cudaMalloc(&result, n);
+    (
+     if (lobster_global_alloc() != nullptr) {
+       result = lobster_global_alloc()->allocate(n);
+     } else {
+       cudaError_t status = cudaMalloc(&result, n);
+     }
 
      if (status != cudaSuccess) {
        cudaGetLastError(); // Clear global CUDA error state.
@@ -110,8 +124,13 @@ _CCCL_HOST_DEVICE void free(execution_policy<DerivedPolicy>&, Pointer ptr)
       thrust::free(thrust::seq, ptr);));
 #else // not __CUB_CACHING_MALLOC
   NV_IF_TARGET(NV_IS_HOST,
-               (cudaError_t status = cudaFree(thrust::raw_pointer_cast(ptr));
-                cuda_cub::throw_on_error(status, "device free failed");),
+               (
+                if (lobster_global_alloc() != nullptr) {
+                  lobster_global_alloc()->deallocate(ptr);
+                } else {
+                  cudaError_t status = cudaFree(thrust::raw_pointer_cast(ptr));
+                  cuda_cub::throw_on_error(status, "device free failed");),
+                }
                ( // NV_IS_DEVICE
                  thrust::free(thrust::seq, ptr);));
 #endif
