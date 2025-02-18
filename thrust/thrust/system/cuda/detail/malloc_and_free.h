@@ -58,8 +58,11 @@ inline cub::CachingDeviceAllocator& get_allocator()
 #endif
 
 class LobsterAllocator {
+ private:
+  void *alloc_;
 public:
   LobsterAllocator(void *alloc);
+  ~LobsterAllocator();
   void *allocate(size_t size);
   void deallocate(void *ptr);
 };
