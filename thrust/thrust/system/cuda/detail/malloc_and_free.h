@@ -42,6 +42,9 @@
 
 #include <nv/target>
 
+void *lobster_global_alloc_allocate(size_t size);
+void lobster_global_alloc_deallocate(void *ptr);
+
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {
@@ -56,18 +59,6 @@ inline cub::CachingDeviceAllocator& get_allocator()
 }
 #  endif
 #endif
-
-class LobsterAllocator {
- private:
-  void *alloc_;
-public:
-  LobsterAllocator(void *alloc);
-  ~LobsterAllocator();
-  void *allocate(size_t size);
-  void deallocate(void *ptr);
-};
-
-LobsterAllocator *lobster_global_alloc();
 
 // note that malloc returns a raw pointer to avoid
 // depending on the heavyweight thrust/system/cuda/memory.h header
@@ -93,13 +84,8 @@ _CCCL_HOST_DEVICE void* malloc(execution_policy<DerivedPolicy>&, std::size_t n)
 #else // not __CUB_CACHING_MALLOC
   NV_IF_TARGET(
     NV_IS_HOST,
-    (
-     if (lobster_global_alloc() != nullptr) {
-       result = lobster_global_alloc()->allocate(n);
-     } else {
-       cudaError_t status = cudaMalloc(&result, n);
-     }
-
+    (return lobster_global_alloc_allocate(n);
+     cudaError_t status = cudaMalloc(&result, n);
      if (status != cudaSuccess) {
        cudaGetLastError(); // Clear global CUDA error state.
        throw thrust::system::detail::bad_alloc(thrust::cuda_category().message(status).c_str());
@@ -127,13 +113,10 @@ _CCCL_HOST_DEVICE void free(execution_policy<DerivedPolicy>&, Pointer ptr)
       thrust::free(thrust::seq, ptr);));
 #else // not __CUB_CACHING_MALLOC
   NV_IF_TARGET(NV_IS_HOST,
-               (
-                if (lobster_global_alloc() != nullptr) {
-                  lobster_global_alloc()->deallocate(ptr);
-                } else {
-                  cudaError_t status = cudaFree(thrust::raw_pointer_cast(ptr));
-                  cuda_cub::throw_on_error(status, "device free failed");),
-                }
+               (lobster_global_alloc_deallocate(thrust::raw_pointer_cast(ptr));
+                return;
+                cudaError_t status = cudaFree(thrust::raw_pointer_cast(ptr));
+                cuda_cub::throw_on_error(status, "device free failed");),
                ( // NV_IS_DEVICE
                  thrust::free(thrust::seq, ptr);));
 #endif
